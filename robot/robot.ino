@@ -2,6 +2,7 @@
 #include "config.h"
 #include "servo.h"
 #include "websocket.h"
+#include "encoder.h"
 
 #include <WiFi.h>
 #include <WiFiManager.h>
@@ -50,6 +51,10 @@ void setup()
     Serial.println("TRIG: GPIO 5");
 
     Serial.println("ECHO: GPIO 19");
+
+
+    // init encoders
+    initEncoders();
 
 
     // ====================================

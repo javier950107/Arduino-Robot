@@ -5,6 +5,8 @@
 #include "config.h"
 #include "servo.h"
 #include "ultrasonic.h"
+#include "motores.h"
+#include "encoder.h"
 
 WebSocketsServer webSocket(WEBSOCKET_PORT);
 
@@ -103,6 +105,51 @@ void webSocketEvent(
         Serial.print("Distancia: ");
         Serial.print(distance);
         Serial.println(" cm");
+
+        return;
+    }
+
+    // MOVIMIENTO EN CENTIMETROS
+    if (
+        message.indexOf("\"cmd\"") >= 0 &&
+        message.indexOf("\"move_cm\"") >= 0
+    )
+    {
+        int distancePosition = message.indexOf("\"distance\":");
+
+        if (distancePosition == -1)
+        {
+            webSocket.sendTXT(
+                clientNum,
+                "{\"ok\":false,\"error\":\"missing_distance\"}"
+            );
+            return;
+        }
+
+        float distance = message.substring(
+            distancePosition + 11
+        ).toFloat();
+
+        if (distance <= 0)
+        {
+            webSocket.sendTXT(
+                clientNum,
+                "{\"ok\":false,\"error\":\"invalid_distance\"}"
+            );
+            return;
+        }
+
+        // Aquí posteriormente llamaremos
+        // a la función que mueve X centímetros.
+
+        Serial.print("Movimiento solicitado: ");
+        Serial.print(distance);
+        Serial.println(" cm");
+
+        webSocket.sendTXT(
+            clientNum,
+            "{\"ok\":true,\"cmd\":\"move_cm\"}"
+        );
 
         return;
     }
