@@ -261,6 +261,79 @@ void webSocketEvent(
         return;
     }
 
+    // ESCANEO DE RANGO
+    // Realiza el barrido completo del servo y las lecturas de
+    // distancia dentro del propio ESP32, devolviendo todas las
+    // mediciones en una sola respuesta. Reduce mucho la latencia
+    // frente a mandar N comandos servo + distance desde el cliente.
+    if (
+        message.indexOf("\"cmd\"") >= 0 &&
+        message.indexOf("\"scan_range\"") >= 0
+    )
+    {
+        float startAngle = 0;
+        float endAngle = 180;
+        float step = 10;
+
+        extractNumber(message, "start", startAngle);
+        extractNumber(message, "end", endAngle);
+        extractNumber(message, "step", step);
+
+        if (step <= 0)
+            step = 10;
+
+        // Normalizar rango.
+        if (startAngle < 0) startAngle = 0;
+        if (endAngle > 180) endAngle = 180;
+        if (endAngle < startAngle)
+        {
+            float tmp = startAngle;
+            startAngle = endAngle;
+            endAngle = tmp;
+        }
+
+        String measurements = "[";
+        bool first = true;
+
+        for (
+            float angle = startAngle;
+            angle <= endAngle;
+            angle += step
+        )
+        {
+            moveServo((int)angle);
+            delay(120);
+
+            long distance = readDistance();
+
+            if (!first)
+                measurements += ",";
+
+            measurements += "{\"angle\":";
+            measurements += String((int)angle);
+            measurements += ",\"distance\":";
+            measurements += String(distance);
+            measurements += "}";
+
+            first = false;
+        }
+
+        measurements += "]";
+
+        // Deja el servo mirando al frente al terminar.
+        moveServo(90);
+
+        String response =
+            "{\"ok\":true,"
+            "\"cmd\":\"scan_range\","
+            "\"measurements\":" +
+            measurements +
+            "}";
+
+        webSocket.sendTXT(clientNum, response);
+        return;
+    }
+
     // GIRO EN EL SITIO
     if (
         message.indexOf("\"cmd\"") >= 0 &&

@@ -182,6 +182,7 @@ Toda la comunicación son mensajes JSON compactos.
 | `distance` | `{"cmd":"distance"}` | Lee el HC-SR04 |
 | `move_cm` | `{"cmd":"move_cm","direction":"forward","distance":20}` | Avanza N cm (`forward` o `backward`) |
 | `turn` | `{"cmd":"turn","direction":"left","ms":500}` | Gira en el sitio N ms (`left` o `right`) |
+| `scan_range` | `{"cmd":"scan_range","start":60,"end":120,"step":10}` | Barre servo del ángulo `start` al `end` y devuelve todas las mediciones en una sola respuesta |
 | `stop` | `{"cmd":"stop"}` | Detiene los motores |
 | `ping` | `{"cmd":"ping"}` | Prueba de conexión |
 
