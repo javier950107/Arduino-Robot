@@ -5,10 +5,91 @@
 #include "config.h"
 #include "servo.h"
 #include "ultrasonic.h"
-#include "motores.h"
+#include "motors.h"
 #include "encoder.h"
 
 WebSocketsServer webSocket(WEBSOCKET_PORT);
+
+
+// Ayuda para leer un campo numérico de un JSON compacto.
+// Devuelve true si lo encontró y escribe el valor en `outValue`.
+// Tolera espacios después del ":" (por ejemplo, "angle": 90).
+static bool extractNumber(
+    const String& message,
+    const String& key,
+    float& outValue
+)
+{
+    String pattern = "\"" + key + "\"";
+
+    int keyPos = message.indexOf(pattern);
+
+    if (keyPos == -1)
+        return false;
+
+    int colonPos = message.indexOf(':', keyPos);
+
+    if (colonPos == -1)
+        return false;
+
+    int start = colonPos + 1;
+
+    while (start < (int)message.length() && message[start] == ' ')
+        start++;
+
+    int end = start;
+
+    while (
+        end < (int)message.length() &&
+        (
+            isdigit(message[end]) ||
+            message[end] == '.' ||
+            message[end] == '-'
+        )
+    )
+        end++;
+
+    if (start == end)
+        return false;
+
+    outValue = message.substring(start, end).toFloat();
+    return true;
+}
+
+
+// Extrae el valor (entre comillas) de un campo string de un JSON compacto.
+static bool extractString(
+    const String& message,
+    const String& key,
+    String& outValue
+)
+{
+    String pattern = "\"" + key + "\"";
+
+    int keyPos = message.indexOf(pattern);
+
+    if (keyPos == -1)
+        return false;
+
+    int colonPos = message.indexOf(':', keyPos);
+
+    if (colonPos == -1)
+        return false;
+
+    int firstQuote = message.indexOf('"', colonPos + 1);
+
+    if (firstQuote == -1)
+        return false;
+
+    int secondQuote = message.indexOf('"', firstQuote + 1);
+
+    if (secondQuote == -1)
+        return false;
+
+    outValue = message.substring(firstQuote + 1, secondQuote);
+    return true;
+}
+
 
 void webSocketEvent(
     uint8_t clientNum,
@@ -33,12 +114,9 @@ void webSocketEvent(
         message.indexOf("\"servo\"") >= 0
     )
     {
-        int anglePosition = message.indexOf("\"angle\":");
+        float angleFloat;
 
-        if (anglePosition == -1)
-            anglePosition = message.indexOf("\"angle\": ");
-
-        if (anglePosition == -1)
+        if (!extractNumber(message, "angle", angleFloat))
         {
             webSocket.sendTXT(
                 clientNum,
@@ -47,9 +125,7 @@ void webSocketEvent(
             return;
         }
 
-        int angle = message.substring(
-            anglePosition + 8
-        ).toInt();
+        int angle = (int)angleFloat;
 
         if (angle < 0 || angle > 180)
         {
@@ -88,7 +164,8 @@ void webSocketEvent(
     // DISTANCIA
     if (
         message.indexOf("\"cmd\"") >= 0 &&
-        message.indexOf("\"distance\"") >= 0
+        message.indexOf("\"distance\"") >= 0 &&
+        message.indexOf("\"move_cm\"") < 0
     )
     {
         long distance = readDistance();
@@ -109,15 +186,15 @@ void webSocketEvent(
         return;
     }
 
-    // MOVIMIENTO EN CENTIMETROS
+    // MOVIMIENTO EN CENTÍMETROS
     if (
         message.indexOf("\"cmd\"") >= 0 &&
         message.indexOf("\"move_cm\"") >= 0
     )
     {
-        int distancePosition = message.indexOf("\"distance\":");
+        float distance;
 
-        if (distancePosition == -1)
+        if (!extractNumber(message, "distance", distance))
         {
             webSocket.sendTXT(
                 clientNum,
@@ -125,10 +202,6 @@ void webSocketEvent(
             );
             return;
         }
-
-        float distance = message.substring(
-            distancePosition + 11
-        ).toFloat();
 
         if (distance <= 0)
         {
@@ -139,18 +212,133 @@ void webSocketEvent(
             return;
         }
 
-        // Aquí posteriormente llamaremos
-        // a la función que mueve X centímetros.
+        // Dirección: por defecto adelante.
+        String direction = "forward";
+        extractString(message, "direction", direction);
 
-        Serial.print("Movimiento solicitado: ");
+        bool goForward = true;
+
+        if (direction == "backward" || direction == "back")
+        {
+            goForward = false;
+        }
+        else if (direction != "forward" && direction != "fwd")
+        {
+            webSocket.sendTXT(
+                clientNum,
+                "{\"ok\":false,\"error\":\"invalid_direction\"}"
+            );
+            return;
+        }
+
+        Serial.print("Moviendo hacia ");
+        Serial.print(goForward ? "adelante" : "atras");
+        Serial.print(" ");
         Serial.print(distance);
         Serial.println(" cm");
 
+        bool finished = moveDistanceCm(goForward, distance);
+
+        long leftPulses = getLeftPulses();
+        long rightPulses = getRightPulses();
+
+        String response =
+            "{\"ok\":" +
+            String(finished ? "true" : "false") +
+            ",\"cmd\":\"move_cm\","
+            "\"direction\":\"" +
+            (goForward ? "forward" : "backward") +
+            "\",\"distance\":" +
+            String(distance) +
+            ",\"left_pulses\":" +
+            String(leftPulses) +
+            ",\"right_pulses\":" +
+            String(rightPulses) +
+            (finished ? "" : ",\"error\":\"timeout\"") +
+            "}";
+
+        webSocket.sendTXT(clientNum, response);
+        return;
+    }
+
+    // GIRO EN EL SITIO
+    if (
+        message.indexOf("\"cmd\"") >= 0 &&
+        message.indexOf("\"turn\"") >= 0
+    )
+    {
+        String direction = "left";
+        extractString(message, "direction", direction);
+
+        bool goLeft = true;
+
+        if (direction == "right")
+        {
+            goLeft = false;
+        }
+        else if (direction != "left")
+        {
+            webSocket.sendTXT(
+                clientNum,
+                "{\"ok\":false,\"error\":\"invalid_direction\"}"
+            );
+            return;
+        }
+
+        float ms;
+
+        if (!extractNumber(message, "ms", ms))
+        {
+            webSocket.sendTXT(
+                clientNum,
+                "{\"ok\":false,\"error\":\"missing_ms\"}"
+            );
+            return;
+        }
+
+        if (ms <= 0)
+        {
+            webSocket.sendTXT(
+                clientNum,
+                "{\"ok\":false,\"error\":\"invalid_ms\"}"
+            );
+            return;
+        }
+
+        Serial.print("Girando hacia la ");
+        Serial.print(goLeft ? "izquierda" : "derecha");
+        Serial.print(" durante ");
+        Serial.print((unsigned long)ms);
+        Serial.println(" ms");
+
+        bool finished = turnMs(goLeft, (unsigned long)ms);
+
+        String response =
+            "{\"ok\":" +
+            String(finished ? "true" : "false") +
+            ",\"cmd\":\"turn\","
+            "\"direction\":\"" +
+            (goLeft ? "left" : "right") +
+            "\",\"ms\":" +
+            String((unsigned long)ms) +
+            "}";
+
+        webSocket.sendTXT(clientNum, response);
+        return;
+    }
+
+    // STOP
+    if (
+        message.indexOf("\"cmd\"") >= 0 &&
+        message.indexOf("\"stop\"") >= 0
+    )
+    {
+        stopMotors();
+
         webSocket.sendTXT(
             clientNum,
-            "{\"ok\":true,\"cmd\":\"move_cm\"}"
+            "{\"ok\":true,\"cmd\":\"stop\"}"
         );
-
         return;
     }
 
@@ -173,6 +361,7 @@ void webSocketEvent(
     );
 }
 
+
 void initWebSocket()
 {
     webSocket.begin();
@@ -182,6 +371,7 @@ void initWebSocket()
     Serial.print("Puerto: ");
     Serial.println(WEBSOCKET_PORT);
 }
+
 
 void handleWebSocket()
 {

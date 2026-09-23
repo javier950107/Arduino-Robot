@@ -3,6 +3,7 @@
 #include "servo.h"
 #include "websocket.h"
 #include "encoder.h"
+#include "motors.h"
 
 #include <WiFi.h>
 #include <WiFiManager.h>
@@ -53,8 +54,24 @@ void setup()
     Serial.println("ECHO: GPIO 19");
 
 
-    // init encoders
+    // ====================================
+    // ENCODERS
+    // ====================================
+
+    Serial.println();
+    Serial.println("Inicializando encoders...");
     initEncoders();
+    Serial.println("Encoders listos.");
+
+
+    // ====================================
+    // MOTORES
+    // ====================================
+
+    Serial.println();
+    Serial.println("Inicializando motores...");
+    initMotors();
+    Serial.println("Motores listos.");
 
 
     // ====================================
